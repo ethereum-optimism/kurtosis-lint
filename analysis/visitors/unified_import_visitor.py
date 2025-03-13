@@ -54,6 +54,9 @@ class UnifiedImportVisitor(BaseVisitor):
         # Track violations for naming conventions
         self.violations: List[Tuple[int, str]] = []
         
+        # Track violations for local import checks separately
+        self.local_import_violations: List[Tuple[int, str]] = []
+        
         # Keep track of global scope variables separately
         self.global_vars: Set[str] = set()
         
@@ -328,6 +331,21 @@ class UnifiedImportVisitor(BaseVisitor):
             logger.warning(f"Error visiting if statement: {str(e)}")
             # Continue with the next statement
     
+    def _check_local_import(self, node, module_path, resolved_path):
+        """
+        Check if a local import exists.
+        
+        Args:
+            node: The node where the import occurs
+            module_path: The module path
+            resolved_path: The resolved path to the module
+        """
+        if self.check_file_exists and resolved_path is not None and not self._check_file_exists(resolved_path):
+            self.local_import_violations.append((
+                node.lineno,
+                f"Imported module '{module_path}' does not exist at resolved path '{resolved_path}'"
+            ))
+
     def _handle_name_assignment(self, node, target_id, is_import_module, module_path=None):
         """
         Handle assignment to a name.
@@ -369,12 +387,8 @@ class UnifiedImportVisitor(BaseVisitor):
                 self.import_module_vars.add(target_id)
                 self.import_module_calls[target_id] = imported_module
                 
-                # Check if the file exists
-                if self.check_file_exists and resolved_path is not None and not self._check_file_exists(resolved_path):
-                    self.violations.append((
-                        node.lineno,
-                        f"Imported module '{module_path}' does not exist at resolved path '{resolved_path}'"
-                    ))
+                # Check if the file exists (now using the separate method)
+                self._check_local_import(node, module_path, resolved_path)
                 
                 # Check naming convention if we're in the global scope
                 if self.scope_level == 0:
@@ -497,4 +511,13 @@ class UnifiedImportVisitor(BaseVisitor):
                 imported_names={}
             )
         
-        return import_info 
+        return import_info
+        
+    def get_local_import_violations(self) -> List[Tuple[int, str]]:
+        """
+        Get violations related to local imports.
+        
+        Returns:
+            List of (line_number, message) tuples for local import violations
+        """
+        return self.local_import_violations 

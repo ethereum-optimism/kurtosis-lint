@@ -11,6 +11,7 @@ This linter performs several checks on Starlark files:
 1. **Call Analysis**: Checks function calls for compatibility with function signatures
 2. **Function Visibility**: Checks if functions are either private or documented
 3. **Import Naming**: Checks if global variables assigned import_module() results start with underscore
+4. **Local Imports**: Checks if imported local modules exist at the resolved path
 
 ## Installation
 
@@ -53,6 +54,7 @@ kurtosis-lint -v path/to/directory
 - `--checked-calls`: Check function calls for compatibility
 - `--function-visibility`: Check function visibility
 - `--import-naming`: Check import_module variable naming
+- `--local-imports`: Check if imported local modules exist at the resolved path
 - `--all`: Run all checks
 - `-v, --verbose`: Enable verbose output
 

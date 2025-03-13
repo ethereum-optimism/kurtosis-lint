@@ -62,6 +62,10 @@ def analyze_file(file_path: str, checks: Dict[str, bool], shared_data: Dict[str,
         # Add import naming violations if that check is enabled
         if checks.get("import_naming", False):
             violations.extend(import_visitor.violations)
+            
+        # Add local import violations if that check is enabled
+        if checks.get("local_imports", False):
+            violations.extend(import_visitor.get_local_import_violations())
         
         # Store import information for function analysis
         shared_data.setdefault("imports", {})[file_path] = import_visitor.get_import_info()
@@ -247,7 +251,8 @@ def main():
     parser.add_argument("--checked-calls", action="store_true", help="Check function calls for compatibility")
     parser.add_argument("--function-visibility", action="store_true", help="Check function visibility")
     parser.add_argument("--import-naming", action="store_true", help="Check import_module variable naming")
-    parser.add_argument("--all", action="store_true", help="Run all checks")
+    parser.add_argument("--local-imports", action="store_true", help="Check if imported local modules exist at the resolved path")
+    parser.add_argument("--all", action="store_true", help="Run all checks (calls, function visibility, import naming, and local imports)")
     args = parser.parse_args()
     
     # Set verbose flag early
@@ -261,7 +266,8 @@ def main():
     checks = {
         "calls": args.checked_calls or args.all,
         "function_visibility": args.function_visibility or args.all,
-        "import_naming": args.import_naming or args.all
+        "import_naming": args.import_naming or args.all,
+        "local_imports": args.local_imports or args.all
     }
     
     if args.verbose:
@@ -292,12 +298,25 @@ def main():
     for file_path, file_violations in violations.items():
         if file_violations:
             total_violations += len(file_violations)
-            for lineno, message in file_violations:
+            # Sort violations by line number
+            # Handle both tuple violations (lineno, message) and Violation objects
+            def get_line_number(violation):
+                if isinstance(violation, tuple):
+                    return violation[0]
+                else:
+                    return violation.line
+                    
+            sorted_violations = sorted(file_violations, key=get_line_number)
+            for violation in sorted_violations:
+                if isinstance(violation, tuple):
+                    lineno, message = violation
+                else:
+                    lineno, message = violation.line, violation.message
                 print(f"{file_path}:{lineno}: {message}")
     
     print(f"\nAnalyzed {len(star_files)} .star files")
     if total_violations > 0:
-        print(f"Found {total_violations} violation{'' if total_violations == 1 else 's'}")
+        print(f"Found {total_violations} violation{'' if total_violations == 1 else 's'} in the analyzed file(s)")
     else:
         print("No violations found")
     
