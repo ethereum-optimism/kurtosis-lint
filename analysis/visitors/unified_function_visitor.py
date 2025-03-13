@@ -169,6 +169,110 @@ class UnifiedFunctionVisitor(BaseVisitor):
         # Exit the scope
         self._exit_scope()
     
+    def visit_Assign(self, node):
+        """Visit assignment nodes to detect function references."""
+        # Visit the value first to handle any nested function calls
+        self.visit(node.value)
+        
+        # Check if the right side is an attribute reference that could be a function reference
+        if isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name):
+            module_name = node.value.value.id
+            attr_name = node.value.attr
+            
+            self.debug_print(f"Found attribute reference: {module_name}.{attr_name} at line {node.lineno}")
+            
+            # Check if this is a reference to an imported module's function
+            if module_name in self.imports:
+                self._check_function_reference(node.lineno, module_name, attr_name)
+        
+        # Continue with normal assignment handling
+        for target in node.targets:
+            self.visit(target)
+    
+    def _check_function_reference(self, lineno, module_name, func_name):
+        """Check if an attribute reference is a function reference and record it."""
+        # Get the import info for the module
+        import_info = self.imports.get(module_name)
+        if not import_info:
+            self.debug_print(f"  No import info for {module_name}")
+            return
+        
+        self.debug_print(f"Checking function reference: {module_name}.{func_name} at line {lineno}")
+        self.debug_print(f"  Import info: {import_info}")
+        
+        # Only verify references to local modules (no package_id)
+        if import_info.package_id is not None:
+            self.debug_print(f"  Skipping external package: {import_info.package_id}")
+            return
+        
+        # Get the module path
+        module_path = import_info.module_path
+        self.debug_print(f"  Module path: {module_path}")
+        self.debug_print(f"  Module to file mapping: {self.module_to_file}")
+        
+        # Ensure module_path has .star extension for Starlark modules
+        if not module_path.endswith('.star'):
+            module_path = module_path + '.star'
+            self.debug_print(f"  Added .star extension to module path: {module_path}")
+        
+        # Try to find the target file
+        target_file = None
+        
+        # Check direct mapping
+        if module_path in self.module_to_file:
+            target_file = self.module_to_file[module_path]
+            self.debug_print(f"  Found target file via direct mapping: {target_file}")
+        else:
+            # Try relative paths
+            if module_path.startswith('./') or module_path.startswith('../'):
+                # Convert relative path to absolute path
+                current_dir = os.path.dirname(self.file_path)
+                abs_module_path = os.path.normpath(os.path.join(current_dir, module_path))
+                self.debug_print(f"  Trying absolute module path: {abs_module_path}")
+                if abs_module_path in self.module_to_file:
+                    target_file = self.module_to_file[abs_module_path]
+                    self.debug_print(f"  Found target file via relative path: {target_file}")
+            
+            # Try basename as a last resort
+            if not target_file:
+                basename = os.path.basename(module_path)
+                for path in self.module_to_file.values():
+                    if os.path.basename(path) == basename:
+                        target_file = path
+                        self.debug_print(f"  Found target file via basename: {target_file}")
+                        break
+        
+        self.debug_print(f"  Target file: {target_file}")
+        
+        if not target_file:
+            self.debug_print(f"  Target file not found")
+            return
+        
+        # Check if the target file has been analyzed
+        if target_file not in self.all_functions:
+            self.debug_print(f"  Target file not in all_functions")
+            return
+        
+        # Get the functions in the target file
+        target_functions = self.all_functions[target_file]
+        self.debug_print(f"  Target functions: {list(target_functions.keys())}")
+        
+        # Check if the function exists in the target file
+        if func_name in target_functions:
+            self.debug_print(f"  Function {func_name} found in target file")
+            
+            # Record this as an external function reference
+            if target_file != self.file_path:
+                self.debug_print(f"  Recording external function reference: {target_file}, {func_name}")
+                self.external_calls.add((target_file, func_name))
+                
+                # Also add to the shared data if available
+                if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
+                    self.debug_print(f"  Adding to shared external calls: {target_file}, {func_name}")
+                    self.shared_data['external_calls'].add((target_file, func_name))
+            else:
+                self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
+    
     def visit_Call(self, node):
         """Visit a function call node."""
         if not self.check_calls:
@@ -190,6 +294,31 @@ class UnifiedFunctionVisitor(BaseVisitor):
         # Skip if the node doesn't have a func attribute (malformed AST)
         if not hasattr(node, 'func'):
             return
+        
+        # Check for function references in arguments
+        for arg in node.args:
+            # Check if the argument is an attribute reference that could be a function reference
+            if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
+                module_name = arg.value.id
+                attr_name = arg.attr
+                
+                self.debug_print(f"Found function reference in argument: {module_name}.{attr_name} at line {node.lineno}")
+                
+                # Check if this is a reference to an imported module's function
+                if module_name in self.imports:
+                    self._check_function_reference(node.lineno, module_name, attr_name)
+        
+        # Check for function references in keyword arguments
+        for keyword in node.keywords:
+            if isinstance(keyword.value, ast.Attribute) and isinstance(keyword.value.value, ast.Name):
+                module_name = keyword.value.value.id
+                attr_name = keyword.value.attr
+                
+                self.debug_print(f"Found function reference in keyword argument: {module_name}.{attr_name} at line {node.lineno}")
+                
+                # Check if this is a reference to an imported module's function
+                if module_name in self.imports:
+                    self._check_function_reference(node.lineno, module_name, attr_name)
         
         # Handle different types of function calls
         if isinstance(node.func, ast.Name):
@@ -596,4 +725,56 @@ class UnifiedFunctionVisitor(BaseVisitor):
         Returns:
             Set of (file_path, function_name) tuples representing external calls
         """
-        return self.external_calls 
+        return self.external_calls
+    
+    def visit_Dict(self, node):
+        """Visit dictionary nodes to detect function references in values."""
+        # Visit all keys and values
+        for key, value in zip(node.keys, node.values):
+            self.visit(key)
+            self.visit(value)
+            
+            # Check if the value is an attribute reference that could be a function reference
+            if isinstance(value, ast.Attribute) and isinstance(value.value, ast.Name):
+                module_name = value.value.id
+                attr_name = value.attr
+                
+                self.debug_print(f"Found function reference in dict value: {module_name}.{attr_name} at line {node.lineno}")
+                
+                # Check if this is a reference to an imported module's function
+                if module_name in self.imports:
+                    self._check_function_reference(node.lineno, module_name, attr_name) 
+    
+    def visit_List(self, node):
+        """Visit list nodes to detect function references in elements."""
+        # Visit all elements
+        for element in node.elts:
+            self.visit(element)
+            
+            # Check if the element is an attribute reference that could be a function reference
+            if isinstance(element, ast.Attribute) and isinstance(element.value, ast.Name):
+                module_name = element.value.id
+                attr_name = element.attr
+                
+                self.debug_print(f"Found function reference in list element: {module_name}.{attr_name} at line {node.lineno}")
+                
+                # Check if this is a reference to an imported module's function
+                if module_name in self.imports:
+                    self._check_function_reference(node.lineno, module_name, attr_name) 
+    
+    def visit_Tuple(self, node):
+        """Visit tuple nodes to detect function references in elements."""
+        # Visit all elements
+        for element in node.elts:
+            self.visit(element)
+            
+            # Check if the element is an attribute reference that could be a function reference
+            if isinstance(element, ast.Attribute) and isinstance(element.value, ast.Name):
+                module_name = element.value.id
+                attr_name = element.attr
+                
+                self.debug_print(f"Found function reference in tuple element: {module_name}.{attr_name} at line {node.lineno}")
+                
+                # Check if this is a reference to an imported module's function
+                if module_name in self.imports:
+                    self._check_function_reference(node.lineno, module_name, attr_name) 

@@ -9,13 +9,16 @@ import unittest
 import os
 import tempfile
 import shutil
+from typing import List, Dict, Any, Union, Tuple
 from unittest.mock import patch
 
 # Import the analyzer module
 try:
     from analysis.unified_analyzer import analyze_file, analyze_files
+    from analysis.visitors.unified_function_visitor import Violation
 except ImportError:
     from unified_analyzer import analyze_file, analyze_files
+    from visitors.unified_function_visitor import Violation
 
 
 class TestUnifiedAnalyzer(unittest.TestCase):
@@ -144,6 +147,24 @@ def get_args():
 optimism_args = input_parser.documented_function(get_args().get("optimism_package", input_parser.plop()))
 ''')
     
+    def _extract_violation_messages(self, violations: List[Union[Tuple[int, str], Violation]]) -> List[str]:
+        """Extract messages from violations, handling both tuple and Violation objects."""
+        messages = []
+        for violation in violations:
+            if isinstance(violation, tuple):
+                _, message = violation
+            else:
+                message = violation.message
+            messages.append(message)
+        return messages
+    
+    def _assert_contains_message(self, messages: List[str], substring: str, error_msg: str = None):
+        """Assert that at least one message contains the given substring."""
+        self.assertTrue(
+            any(substring in msg for msg in messages),
+            error_msg or f"No message containing '{substring}' found in violations"
+        )
+    
     def test_analyze_file_import_naming(self):
         """Test analyzing a file for import naming violations."""
         # Set up checks
@@ -161,9 +182,10 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         self.assertTrue(violations)
         
         # Check that the correct violations were reported
-        violation_messages = [msg for _, msg in violations]
-        self.assertTrue(any("module" in msg and "should start with an underscore" in msg for msg in violation_messages))
-        self.assertTrue(any("alias" in msg and "should start with an underscore" in msg for msg in violation_messages))
+        messages = self._extract_violation_messages(violations)
+        self._assert_contains_message(messages, "module", "No violation for 'module' found")
+        self._assert_contains_message(messages, "should be private", "No 'should be private' message found")
+        self._assert_contains_message(messages, "alias", "No violation for 'alias' found")
     
     def test_analyze_file_function_calls(self):
         """Test analyzing a file for function call violations."""
@@ -185,8 +207,8 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         self.assertTrue(violations)
         
         # Check that the correct violations were reported
-        violation_messages = [msg for _, msg in violations]
-        self.assertTrue(any("Missing required positional argument" in msg for msg in violation_messages))
+        messages = self._extract_violation_messages(violations)
+        self._assert_contains_message(messages, "Missing required positional argument")
     
     def test_analyze_file_function_visibility(self):
         """Test analyzing a file for function visibility violations."""
@@ -210,8 +232,9 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         self.assertTrue(violations)
         
         # Check that the correct violations were reported
-        violation_messages = [msg for _, msg in violations]
-        self.assertTrue(any("undocumented_function" in msg and "consider making it private" in msg for msg in violation_messages))
+        messages = self._extract_violation_messages(violations)
+        self._assert_contains_message(messages, "undocumented_function", "No violation for 'undocumented_function' found")
+        self._assert_contains_message(messages, "consider making it private", "No 'consider making it private' message found")
     
     def test_analyze_files_all_checks(self):
         """Test analyzing multiple files with all checks enabled."""
@@ -262,15 +285,24 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         self.assertTrue(violations)
         
         # Check that the correct violations were reported
-        violation_messages = [msg for _, msg in violations]
+        messages = self._extract_violation_messages(violations)
         
         # Check for non-existent function calls in nested contexts
-        self.assertTrue(any("non_existent_function" in msg for msg in violation_messages), 
-                       "Failed to detect non-existent function in first nested call")
-        self.assertTrue(any("another_non_existent" in msg for msg in violation_messages), 
-                       "Failed to detect non-existent function in second nested call")
-        self.assertTrue(any("third_non_existent" in msg for msg in violation_messages), 
-                       "Failed to detect non-existent function in keyword argument")
+        self._assert_contains_message(
+            messages, 
+            "non_existent_function", 
+            "Failed to detect non-existent function in first nested call"
+        )
+        self._assert_contains_message(
+            messages, 
+            "another_non_existent", 
+            "Failed to detect non-existent function in second nested call"
+        )
+        self._assert_contains_message(
+            messages, 
+            "third_non_existent", 
+            "Failed to detect non-existent function in keyword argument"
+        )
 
     def test_plop_scenario(self):
         """Test the specific input_parser.plop() scenario."""
@@ -292,11 +324,206 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         self.assertTrue(violations)
         
         # Check that the correct violations were reported
-        violation_messages = [msg for _, msg in violations]
+        messages = self._extract_violation_messages(violations)
         
         # Check for the non-existent plop function call
-        self.assertTrue(any("plop" in msg for msg in violation_messages), 
-                       "Failed to detect non-existent plop function in nested call")
+        self._assert_contains_message(
+            messages, 
+            "plop", 
+            "Failed to detect non-existent plop function in nested call"
+        )
+        
+    def test_function_reference_scenario(self):
+        """Test that function references (not calls) are recognized as external references."""
+        # Create test files
+        test_dir = os.path.join(tempfile.gettempdir(), "kurtosis_lint_test_function_reference")
+        os.makedirs(test_dir, exist_ok=True)
+        
+        # Create a module with a function
+        module_file = os.path.join(test_dir, "module.star")
+        with open(module_file, "w") as f:
+            f.write("""
+def public_function():
+    \"\"\"This is a documented public function.\"\"\"
+    return "Hello, world!"
+
+def undocumented_function():
+    return "No docs here"
+""")
+        
+        # Create a file that references the function without calling it
+        reference_file = os.path.join(test_dir, "reference.star")
+        with open(reference_file, "w") as f:
+            f.write("""
+_module = import_module("./module.star")
+
+# Reference the function without calling it
+func_reference = _module.public_function
+
+# Pass the function as an argument
+def take_func(func):
+    return func()
+
+result = take_func(_module.undocumented_function)
+""")
+        
+        # Run the analyzer
+        checks = {
+            "calls": True,
+            "function_visibility": True,
+            "import_naming": True,
+            "local_imports": True
+        }
+        
+        violations = analyze_files([module_file, reference_file], checks)
+        
+        # Check that no violations were found for the documented function
+        module_violations = violations.get(module_file, [])
+        
+        # The undocumented function should have a violation since it's used externally
+        messages = self._extract_violation_messages(module_violations)
+        self._assert_contains_message(
+            messages,
+            "undocumented_function",
+            "Should have found a violation for the undocumented function referenced externally"
+        )
+        self._assert_contains_message(
+            messages,
+            "should be documented",
+            "Should have found a message indicating the function should be documented"
+        )
+
+    def test_function_reference_in_array(self):
+        """Test that function references in arrays are recognized as external references."""
+        # Create test files
+        test_dir = os.path.join(tempfile.gettempdir(), "kurtosis_lint_test_function_reference_array")
+        os.makedirs(test_dir, exist_ok=True)
+        
+        # Create a module with a function
+        module_file = os.path.join(test_dir, "module.star")
+        with open(module_file, "w") as f:
+            f.write("""
+def public_function():
+    \"\"\"This is a documented public function.\"\"\"
+    return "Hello, world!"
+
+def undocumented_function():
+    return "No docs here"
+""")
+        
+        # Create a file that references the function in an array
+        reference_file = os.path.join(test_dir, "array_reference.star")
+        with open(reference_file, "w") as f:
+            f.write("""
+_module = import_module("./module.star")
+
+# Reference the function in an array
+func_references = [
+    _module.public_function,
+    _module.undocumented_function
+]
+
+# Use the functions from the array
+def execute_functions(funcs):
+    results = []
+    for func in funcs:
+        results.append(func())
+    return results
+
+results = execute_functions(func_references)
+""")
+        
+        # Run the analyzer
+        checks = {
+            "calls": True,
+            "function_visibility": True,
+            "import_naming": True,
+            "local_imports": True
+        }
+        
+        violations = analyze_files([module_file, reference_file], checks)
+        
+        # Check that no violations were found for the documented function
+        module_violations = violations.get(module_file, [])
+        
+        # The undocumented function should have a violation since it's used externally
+        messages = self._extract_violation_messages(module_violations)
+        self._assert_contains_message(
+            messages,
+            "undocumented_function",
+            "Should have found a violation for the undocumented function referenced in an array"
+        )
+        self._assert_contains_message(
+            messages,
+            "should be documented",
+            "Should have found a message indicating the function should be documented"
+        )
+
+    def test_function_reference_in_tuple(self):
+        """Test that function references in tuples are recognized as external references."""
+        # Create test files
+        test_dir = os.path.join(tempfile.gettempdir(), "kurtosis_lint_test_function_reference_tuple")
+        os.makedirs(test_dir, exist_ok=True)
+        
+        # Create a module with a function
+        module_file = os.path.join(test_dir, "module.star")
+        with open(module_file, "w") as f:
+            f.write("""
+def public_function():
+    \"\"\"This is a documented public function.\"\"\"
+    return "Hello, world!"
+
+def undocumented_function():
+    return "No docs here"
+""")
+        
+        # Create a file that references the function in a tuple
+        reference_file = os.path.join(test_dir, "tuple_reference.star")
+        with open(reference_file, "w") as f:
+            f.write("""
+_module = import_module("./module.star")
+
+# Reference the function in a tuple
+func_references = (
+    _module.public_function,
+    _module.undocumented_function
+)
+
+# Use the functions from the tuple
+def execute_functions(funcs):
+    results = []
+    for func in funcs:
+        results.append(func())
+    return results
+
+results = execute_functions(func_references)
+""")
+        
+        # Run the analyzer
+        checks = {
+            "calls": True,
+            "function_visibility": True,
+            "import_naming": True,
+            "local_imports": True
+        }
+        
+        violations = analyze_files([module_file, reference_file], checks)
+        
+        # Check that no violations were found for the documented function
+        module_violations = violations.get(module_file, [])
+        
+        # The undocumented function should have a violation since it's used externally
+        messages = self._extract_violation_messages(module_violations)
+        self._assert_contains_message(
+            messages,
+            "undocumented_function",
+            "Should have found a violation for the undocumented function referenced in a tuple"
+        )
+        self._assert_contains_message(
+            messages,
+            "should be documented",
+            "Should have found a message indicating the function should be documented"
+        )
 
 
 if __name__ == "__main__":
