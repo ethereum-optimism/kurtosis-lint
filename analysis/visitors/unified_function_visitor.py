@@ -189,21 +189,28 @@ class UnifiedFunctionVisitor(BaseVisitor):
         for target in node.targets:
             self.visit(target)
     
-    def _check_function_reference(self, lineno, module_name, func_name):
-        """Check if an attribute reference is a function reference and record it."""
+    def _resolve_module_file(self, module_name):
+        """
+        Resolve a module name to a file path.
+        
+        Args:
+            module_name: The name of the module to resolve
+            
+        Returns:
+            A tuple of (import_info, target_file) or (None, None) if the module couldn't be resolved
+        """
         # Get the import info for the module
         import_info = self.imports.get(module_name)
         if not import_info:
             self.debug_print(f"  No import info for {module_name}")
-            return
+            return None, None
         
-        self.debug_print(f"Checking function reference: {module_name}.{func_name} at line {lineno}")
         self.debug_print(f"  Import info: {import_info}")
         
         # Only verify references to local modules (no package_id)
         if import_info.package_id is not None:
             self.debug_print(f"  Skipping external package: {import_info.package_id}")
-            return
+            return import_info, None
         
         # Get the module path
         module_path = import_info.module_path
@@ -243,9 +250,36 @@ class UnifiedFunctionVisitor(BaseVisitor):
                         break
         
         self.debug_print(f"  Target file: {target_file}")
+        return import_info, target_file
+    
+    def _record_external_function_reference(self, target_file, func_name):
+        """
+        Record an external function reference.
+        
+        Args:
+            target_file: The file containing the function
+            func_name: The name of the function
+        """
+        if target_file != self.file_path:
+            self.debug_print(f"  Recording external function reference: {target_file}, {func_name}")
+            self.external_calls.add((target_file, func_name))
+            
+            # Also add to the shared data if available
+            if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
+                self.debug_print(f"  Adding to shared external calls: {target_file}, {func_name}")
+                self.shared_data['external_calls'].add((target_file, func_name))
+        else:
+            self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
+    
+    def _check_function_reference(self, lineno, module_name, func_name):
+        """Check if an attribute reference is a function reference and record it."""
+        self.debug_print(f"Checking function reference: {module_name}.{func_name} at line {lineno}")
+        
+        # Resolve the module to a file
+        _, target_file = self._resolve_module_file(module_name)
         
         if not target_file:
-            self.debug_print(f"  Target file not found")
+            self.debug_print(f"  Target file not found or skipped")
             return
         
         # Check if the target file has been analyzed
@@ -262,16 +296,7 @@ class UnifiedFunctionVisitor(BaseVisitor):
             self.debug_print(f"  Function {func_name} found in target file")
             
             # Record this as an external function reference
-            if target_file != self.file_path:
-                self.debug_print(f"  Recording external function reference: {target_file}, {func_name}")
-                self.external_calls.add((target_file, func_name))
-                
-                # Also add to the shared data if available
-                if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
-                    self.debug_print(f"  Adding to shared external calls: {target_file}, {func_name}")
-                    self.shared_data['external_calls'].add((target_file, func_name))
-            else:
-                self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
+            self._record_external_function_reference(target_file, func_name)
     
     def visit_Call(self, node):
         """Visit a function call node."""
@@ -428,66 +453,18 @@ class UnifiedFunctionVisitor(BaseVisitor):
     
     def _check_imported_module_call(self, node, module_name, func_name):
         """Check a call to a function in an imported module."""
-        # Get the import info for the module
-        import_info = self.imports.get(module_name)
-        if not import_info:
-            self.debug_print(f"  No import info for {module_name}")
-            return
-        
         self.debug_print(f"Checking imported module call: {module_name}.{func_name} at line {node.lineno}")
-        self.debug_print(f"  Import info: {import_info}")
         
-        # Only verify calls to local modules (no package_id)
-        if import_info.package_id is not None:
-            self.debug_print(f"  Skipping external package: {import_info.package_id}")
-            return
-        
-        # Get the module path
-        module_path = import_info.module_path
-        self.debug_print(f"  Module path: {module_path}")
-        self.debug_print(f"  Module to file mapping: {self.module_to_file}")
-        
-        # Ensure module_path has .star extension for Starlark modules
-        if not module_path.endswith('.star'):
-            module_path = module_path + '.star'
-            self.debug_print(f"  Added .star extension to module path: {module_path}")
-        
-        # Try to find the target file
-        target_file = None
-        
-        # Check direct mapping
-        if module_path in self.module_to_file:
-            target_file = self.module_to_file[module_path]
-            self.debug_print(f"  Found target file via direct mapping: {target_file}")
-        else:
-            # Try relative paths
-            if module_path.startswith('./') or module_path.startswith('../'):
-                # Convert relative path to absolute path
-                current_dir = os.path.dirname(self.file_path)
-                abs_module_path = os.path.normpath(os.path.join(current_dir, module_path))
-                self.debug_print(f"  Trying absolute module path: {abs_module_path}")
-                if abs_module_path in self.module_to_file:
-                    target_file = self.module_to_file[abs_module_path]
-                    self.debug_print(f"  Found target file via relative path: {target_file}")
-            
-            # Try basename as a last resort
-            if not target_file:
-                basename = os.path.basename(module_path)
-                for path in self.module_to_file.values():
-                    if os.path.basename(path) == basename:
-                        target_file = path
-                        self.debug_print(f"  Found target file via basename: {target_file}")
-                        break
-        
-        self.debug_print(f"  Target file: {target_file}")
+        # Resolve the module to a file
+        import_info, target_file = self._resolve_module_file(module_name)
         
         if not target_file:
-            self.debug_print(f"  Target file not found")
             # Add a violation for calling a function in a module that couldn't be resolved
-            self.violations.append((
-                node.lineno,
-                f"Could not resolve module '{module_name}' for call to '{module_name}.{func_name}'"
-            ))
+            if import_info:  # We have import info but couldn't resolve the file
+                self.violations.append((
+                    node.lineno,
+                    f"Could not resolve module '{module_name}' for call to '{module_name}.{func_name}'"
+                ))
             return
         
         # Check if the target file has been analyzed
@@ -526,18 +503,8 @@ class UnifiedFunctionVisitor(BaseVisitor):
         self.debug_print(f"  Keywords: {[kw.arg for kw in node.keywords]}")
         self._check_call_compatibility(node, target_signature, target_file)
         
-        # Only record external calls if the target file is different from the current file
-        # This ensures we don't count calls within the same file as external calls
-        if target_file != self.file_path:
-            self.debug_print(f"  Recording external call: {target_file}, {func_name}")
-            self.external_calls.add((target_file, func_name))
-            
-            # Also add to the shared data if available
-            if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
-                self.debug_print(f"  Adding to shared external calls: {target_file}, {func_name}")
-                self.shared_data['external_calls'].add((target_file, func_name))
-        else:
-            self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
+        # Record this as an external function reference
+        self._record_external_function_reference(target_file, func_name)
     
     def _check_call_compatibility(self, call_node, signature, context_file=None):
         """Check if a function call is compatible with the function signature."""

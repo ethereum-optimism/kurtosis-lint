@@ -67,7 +67,7 @@ imports = import_module("/path/to/module.star")
         
         # Check that a violation was reported
         self.assertEqual(len(self.visitor.violations), 1)
-        self.assertIn("should start with an underscore", self.visitor.violations[0][1])
+        self.assertIn("should be private", self.visitor.violations[0][1])
     
     def test_alias_tracking(self):
         """Test tracking of aliases to import_module results."""
@@ -81,7 +81,7 @@ alias = _imports
         # Check that a violation was reported for the alias
         self.assertEqual(len(self.visitor.violations), 1)
         self.assertIn("alias", self.visitor.violations[0][1])
-        self.assertIn("should start with an underscore", self.visitor.violations[0][1])
+        self.assertIn("should be private", self.visitor.violations[0][1])
     
     def test_module_path_resolution(self):
         """Test resolution of module paths."""
