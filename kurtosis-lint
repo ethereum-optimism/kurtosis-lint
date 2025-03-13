@@ -4,5 +4,21 @@
 # Get the directory of this script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# Run the Python module
-python -m analysis.unified_analyzer "$@" 
+# Get the package root directory (parent of the script directory if installed in bin/)
+if [[ "$SCRIPT_DIR" == *"/bin" ]]; then
+    # If installed in a bin directory, the package is likely in the parent directory
+    PACKAGE_DIR="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+else
+    # Otherwise, assume the script is in the package root
+    PACKAGE_DIR="$SCRIPT_DIR"
+fi
+
+# Check if the package is installed
+if python -c "import analysis.unified_analyzer" 2>/dev/null; then
+    # If the package is installed, run it directly
+    python -m analysis.unified_analyzer "$@"
+else
+    # If not installed, add the package directory to PYTHONPATH
+    export PYTHONPATH="$PACKAGE_DIR:${PYTHONPATH:-}"
+    python -m analysis.unified_analyzer "$@"
+fi 
