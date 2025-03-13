@@ -288,21 +288,21 @@ def main():
     violations = analyze_files(star_files, checks, workspace_root)
     
     # Print violations
-    violations_found = False
+    total_violations = 0
     for file_path, file_violations in violations.items():
         if file_violations:
-            violations_found = True
+            total_violations += len(file_violations)
             for lineno, message in file_violations:
                 print(f"{file_path}:{lineno}: {message}")
     
     print(f"\nAnalyzed {len(star_files)} .star files")
-    if violations_found:
-        print("Found violations in the analyzed file(s)")
+    if total_violations > 0:
+        print(f"Found {total_violations} violation{'' if total_violations == 1 else 's'}")
     else:
         print("No violations found")
     
     # Exit with appropriate code
-    sys.exit(0 if not violations_found else 1)
+    sys.exit(0 if total_violations == 0 else 1)
 
 
 if __name__ == "__main__":

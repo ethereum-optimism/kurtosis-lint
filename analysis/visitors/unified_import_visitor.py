@@ -242,12 +242,12 @@ class UnifiedImportVisitor(BaseVisitor):
             if is_alias:
                 self.violations.append((
                     node.lineno,
-                    f"Global variable '{var_name}' is an alias to an `import_module` result and should start with an underscore"
+                    f"Global variable '{var_name}' is an alias to an `import_module` result and should be private"
                 ))
             else:
                 self.violations.append((
                     node.lineno,
-                    f"Global variable '{var_name}' assigned the result of import_module() should start with an underscore"
+                    f"Global variable '{var_name}' contains the result of `import_module` and should be private"
                 ))
 
     def _process_assignment(self, node, target_id, is_import_module):
