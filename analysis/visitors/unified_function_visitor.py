@@ -181,7 +181,9 @@ class UnifiedFunctionVisitor(BaseVisitor):
             if isinstance(node.func, ast.Name):
                 self.debug_print(f"  Call to: {node.func.id}()")
             elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                self.debug_print(f"  Call to: {node.func.value.id}.{node.func.attr}()")
+                module_name = node.func.value.id
+                func_name = node.func.attr
+                self.debug_print(f"  Call to: {module_name}.{func_name}()")
             else:
                 self.debug_print(f"  Call to: {type(node.func).__name__}")
         
@@ -198,63 +200,62 @@ class UnifiedFunctionVisitor(BaseVisitor):
             # Skip built-in functions
             if func_name in builtin_functions:
                 self.debug_print(f"  {func_name} is a built-in function, skipping check")
-                return
-            
-            # Check if the function exists in the current file
-            if func_name in self.functions:
-                self.debug_print(f"  {func_name} is defined in this file")
-                self._check_call_compatibility(node, self.functions[func_name])
-                
-                # Track internal function calls for visibility analysis
-                if not hasattr(self, 'internal_calls'):
-                    self.internal_calls = set()
-                self.internal_calls.add(func_name)
-                self.debug_print(f"  Adding internal call to {func_name}")
-            
-            # Check if the function exists in other files
             else:
-                # Find all files that have a function with this name
-                matching_files = []
-                for file_path, functions in self.all_functions.items():
-                    if func_name in functions:
-                        matching_files.append(file_path)
+                # Check if the function exists in the current file
+                if func_name in self.functions:
+                    self.debug_print(f"  {func_name} is defined in this file")
+                    self._check_call_compatibility(node, self.functions[func_name])
+                    
+                    # Track internal function calls for visibility analysis
+                    if not hasattr(self, 'internal_calls'):
+                        self.internal_calls = set()
+                    self.internal_calls.add(func_name)
+                    self.debug_print(f"  Adding internal call to {func_name}")
                 
-                self.debug_print(f"  Found {len(matching_files)} files with function {func_name}")
-                
-                # If there's exactly one matching file, check compatibility
-                if len(matching_files) == 1:
-                    file_path = matching_files[0]
-                    self.debug_print(f"  Function {func_name} is defined in {file_path}")
+                # Check if the function exists in other files
+                else:
+                    # Find all files that have a function with this name
+                    matching_files = []
+                    for file_path, functions in self.all_functions.items():
+                        if func_name in functions:
+                            matching_files.append(file_path)
                     
-                    # Get the function signature
-                    signature = self.all_functions[file_path][func_name]
+                    self.debug_print(f"  Found {len(matching_files)} files with function {func_name}")
                     
-                    # Check compatibility
-                    self._check_call_compatibility(node, signature, file_path)
-                    
-                    # Record the external call only if it's from a different file
-                    if file_path != self.file_path:
-                        self.debug_print(f"  Recording external call to {file_path}:{func_name}")
-                        self.external_calls.add((file_path, func_name))
+                    # If there's exactly one matching file, check compatibility
+                    if len(matching_files) == 1:
+                        file_path = matching_files[0]
+                        self.debug_print(f"  Function {func_name} is defined in {file_path}")
                         
-                        # Also add to the shared data if available
-                        if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
-                            self.debug_print(f"  Adding to shared external calls: {file_path}, {func_name}")
-                            self.shared_data['external_calls'].add((file_path, func_name))
-                    else:
-                        self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
-                # Even if we don't check compatibility (due to multiple modules having the function),
-                # we should still record the external call for the test to pass
-                elif len(matching_files) > 0:
-                    # For the test, we'll record the first matching file that's not the current file
-                    for file_path in matching_files:
+                        # Get the function signature
+                        signature = self.all_functions[file_path][func_name]
+                        
+                        # Check compatibility
+                        self._check_call_compatibility(node, signature, file_path)
+                        
+                        # Record the external call only if it's from a different file
                         if file_path != self.file_path:
+                            self.debug_print(f"  Recording external call to {file_path}:{func_name}")
                             self.external_calls.add((file_path, func_name))
                             
                             # Also add to the shared data if available
                             if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
+                                self.debug_print(f"  Adding to shared external calls: {file_path}, {func_name}")
                                 self.shared_data['external_calls'].add((file_path, func_name))
-                            break
+                        else:
+                            self.debug_print(f"  Skipping recording external call for {func_name} as it's in the same file")
+                    # Even if we don't check compatibility (due to multiple modules having the function),
+                    # we should still record the external call for the test to pass
+                    elif len(matching_files) > 0:
+                        # For the test, we'll record the first matching file that's not the current file
+                        for file_path in matching_files:
+                            if file_path != self.file_path:
+                                self.external_calls.add((file_path, func_name))
+                                
+                                # Also add to the shared data if available
+                                if hasattr(self, 'shared_data') and 'external_calls' in self.shared_data:
+                                    self.shared_data['external_calls'].add((file_path, func_name))
+                                break
         
         elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
             # Attribute call (e.g., module.function())
@@ -265,33 +266,36 @@ class UnifiedFunctionVisitor(BaseVisitor):
             # Skip built-in modules
             if module_name in builtin_modules:
                 self.debug_print(f"  {module_name} is a built-in module, skipping check")
-                return
-            
-            # Check if the object is a variable in scope
-            if module_name in self.imports:
-                self.debug_print(f"  {module_name} is an imported module")
-                self.debug_print(f"  Import info: {self.imports[module_name]}")
-                self.debug_print(f"  Available imports: {list(self.imports.keys())}")
-                self._check_imported_module_call(node, module_name, func_name)
-            elif self._is_in_scope(module_name):
-                # The variable exists in scope but is not an import
-                self.debug_print(f"  {module_name} is in scope but not an import")
-                return
             else:
-                # Object is not in scope and not a builtin module - this is an invalid call
-                self.violations.append((
-                    node.lineno,
-                    f"Invalid object '{module_name}' in call to '{module_name}.{func_name}': object is not defined"
-                ))
-                self.debug_print(f"  {module_name} is not in scope and not a builtin module")
-            
-            # Log the arguments for debugging
-            arg_types = [type(arg).__name__ for arg in node.args]
-            self.debug_print(f"  Args: {arg_types}")
-            self.debug_print(f"  Keywords: {[kw.arg for kw in node.keywords]}")
+                # Check if the object is a variable in scope
+                if module_name in self.imports:
+                    self.debug_print(f"  {module_name} is an imported module")
+                    self.debug_print(f"  Import info: {self.imports[module_name]}")
+                    self.debug_print(f"  Available imports: {list(self.imports.keys())}")
+                    self._check_imported_module_call(node, module_name, func_name)
+                elif self._is_in_scope(module_name):
+                    # The variable exists in scope but is not an import
+                    self.debug_print(f"  {module_name} is in scope but not an import")
+                else:
+                    # Object is not in scope and not a builtin module - this is an invalid call
+                    self.violations.append((
+                        node.lineno,
+                        f"Invalid object '{module_name}' in call to '{module_name}.{func_name}': object is not defined"
+                    ))
+                    self.debug_print(f"  {module_name} is not in scope and not a builtin module")
+                
+                # Log the arguments for debugging
+                arg_types = [type(arg).__name__ for arg in node.args]
+                self.debug_print(f"  Args: {arg_types}")
+                self.debug_print(f"  Keywords: {[kw.arg for kw in node.keywords]}")
         
-        # Visit child nodes
-        self.generic_visit(node)
+        # Always visit arguments to check for nested function calls
+        self.debug_print(f"  Visiting arguments for nested function calls")
+        for arg in node.args:
+            self.visit(arg)
+        
+        for keyword in node.keywords:
+            self.visit(keyword.value)
     
     def _check_imported_module_call(self, node, module_name, func_name):
         """Check a call to a function in an imported module."""
@@ -350,11 +354,21 @@ class UnifiedFunctionVisitor(BaseVisitor):
         
         if not target_file:
             self.debug_print(f"  Target file not found")
+            # Add a violation for calling a function in a module that couldn't be resolved
+            self.violations.append((
+                node.lineno,
+                f"Could not resolve module '{module_name}' for call to '{module_name}.{func_name}'"
+            ))
             return
         
         # Check if the target file has been analyzed
         if target_file not in self.all_functions:
             self.debug_print(f"  Target file not in all_functions")
+            # Add a violation for calling a function in a module that hasn't been analyzed
+            self.violations.append((
+                node.lineno,
+                f"Module '{module_name}' has not been analyzed for call to '{module_name}.{func_name}'"
+            ))
             return
         
         # Get the functions in the target file
@@ -364,6 +378,12 @@ class UnifiedFunctionVisitor(BaseVisitor):
         # Check if the function exists in the target file
         if func_name not in target_functions:
             self.debug_print(f"  Function {func_name} not found in target file")
+            self.debug_print(f"  ADDING VIOLATION for non-existent function: {func_name} in module {module_name}")
+            # Add a violation for calling a non-existent function
+            self.violations.append((
+                node.lineno,
+                f"Call to non-existent function '{func_name}' in module '{module_name}'"
+            ))
             return
         
         # Get the target function signature
