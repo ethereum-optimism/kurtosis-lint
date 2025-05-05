@@ -161,6 +161,22 @@ class BaseVisitor(ast.NodeVisitor):
         
         # Exit the else scope
         self._exit_scope()
+
+    def visit_ListComp(self, node):
+        """Handle list comprehension."""
+
+        # Enter a new scope for the comprehension contents
+        self._enter_scope()
+
+        # Add generators to the scope
+        for generator in node.generators:
+            self._add_to_current_scope(generator.target.id)
+        
+        # Visit the list comprehension expression
+        self.visit(node.elt)
+
+        # Exit the list comprehension scope
+        self._exit_scope()
     
     def _handle_name_assignment(self, name_node, value_node):
         """Handle assignment to a simple variable name."""
