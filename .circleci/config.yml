@@ -1,0 +1,34 @@
+version: 2.1
+
+executors:
+  default:
+    machine:
+      image: ubuntu-2404:2024.05.1
+
+workflows:
+  main:
+    jobs:
+      - python-test
+
+commands:
+  install-dependencies:
+    steps:
+      - run:
+          name: Install mise
+          command: curl https://mise.run | MISE_INSTALL_PATH=/home/circleci/bin/mise sh
+      - run:
+          name: Activate mise
+          command: echo 'eval "$(mise activate bash)"' >> $BASH_ENV
+      - run:
+          name: Install mise dependencies
+          command: mise install
+
+jobs:
+  python-test:
+    executor: default
+    steps:
+      - checkout
+      - install-dependencies
+      - run:
+          name: Run tests
+          command: pytest -s
