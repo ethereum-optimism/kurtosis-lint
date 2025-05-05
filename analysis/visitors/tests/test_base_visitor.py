@@ -175,6 +175,25 @@ y, z = 2, 3
         self.assertIn("y", self.visitor.scopes[-1])
         self.assertIn("z", self.visitor.scopes[-1])
     
+    def test_visit_list_comprehension(self):
+        """Test visiting a list comprehension."""
+        code = """
+[s.replace('a', 'o') for s in ['a', 'b', 'c']]
+"""
+        node = ast.parse(code)
+
+        list_comp_node = node.body[0].value
+        
+        # Enter module scope first (as would happen in a real visit)
+        self.visitor._enter_scope()
+        
+        # Visit the list comprehension statement
+        self.visitor.visit_ListComp(list_comp_node)
+        
+        # After visiting, we should be back to just the module scope
+        # Plus the original scope we entered
+        self.assertEqual(len(self.visitor.scopes), 2)
+    
     def test_complex_scope_tracking(self):
         """Test tracking variables across complex nested scopes."""
         code = """

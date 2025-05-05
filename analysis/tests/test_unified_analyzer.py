@@ -77,6 +77,19 @@ _correct = import_module("/another/module.star")
 # Alias violation
 alias = module
 ''')
+            
+        comps_file = os.path.join(self.temp_dir, "comps.star")
+        with open(comps_file, "w") as f:
+            f.write('''"""
+File with comprehensions.
+"""
+
+# Valid list comprehension                   
+[s.replace('a', 'b') for s in ['a', 'b']]
+                    
+# Invalid list comprehension                   
+[x.replace('a', 'b') for s in ['a', 'b']]
+''')
         
         # Create a file with function calls
         calls_file = os.path.join(self.temp_dir, "calls.star")
@@ -250,6 +263,7 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
             os.path.join(self.temp_dir, "module.star"),
             os.path.join(self.temp_dir, "imports.star"),
             os.path.join(self.temp_dir, "calls.star"),
+            os.path.join(self.temp_dir, "comps.star"),
             os.path.join(self.temp_dir, "nested_calls.star"),
             os.path.join(self.temp_dir, "plop_scenario.star")
         ]
@@ -258,7 +272,7 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         violations = analyze_files(test_files, checks, self.temp_dir)
         
         # Check that violations were found in all files
-        self.assertEqual(len(violations), 5)
+        self.assertEqual(len(violations), 6)
         
         # Check that each file has at least one violation
         for file_path in test_files:
@@ -302,6 +316,35 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
             messages, 
             "third_non_existent", 
             "Failed to detect non-existent function in keyword argument"
+        )
+
+    def test_analyze_comps(self):
+        """Test analyzing a file for comprehension violations."""
+        # Set up checks
+        checks = {
+            "import_naming": False,
+            "calls": True,
+            "function_visibility": False
+        }
+        
+        # Set up shared data
+        shared_data = {}
+        
+        # Analyze the nested calls file
+        nested_calls_file = os.path.join(self.temp_dir, "comps.star")
+        violations = analyze_file(nested_calls_file, checks, shared_data, self.temp_dir)
+        
+        # Check that violations were found
+        self.assertTrue(violations)
+        
+        # Check that the correct violations were reported
+        messages = self._extract_violation_messages(violations)
+        
+        # Check for non-existent function calls in nested contexts
+        self._assert_contains_message(
+            messages, 
+            "'x'", 
+            "Invalid object 'x' in call to 'x.replace': object is not defined"
         )
 
     def test_plop_scenario(self):
