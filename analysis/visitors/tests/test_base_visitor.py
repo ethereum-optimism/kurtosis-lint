@@ -194,26 +194,6 @@ y, z = 2, 3
         # Plus the original scope we entered
         self.assertEqual(len(self.visitor.scopes), 2)
     
-    def test_visit_assign(self):
-        """Test visiting an assignment statement."""
-        code = """
-x = 1
-y, z = 2, 3
-"""
-        node = ast.parse(code)
-        
-        # Enter module scope first (as would happen in a real visit)
-        self.visitor._enter_scope()
-        
-        # Visit the assignments
-        for assign_node in node.body:
-            self.visitor.visit_Assign(assign_node)
-        
-        # The variables should be added to the current scope
-        self.assertIn("x", self.visitor.scopes[-1])
-        self.assertIn("y", self.visitor.scopes[-1])
-        self.assertIn("z", self.visitor.scopes[-1])
-    
     def test_complex_scope_tracking(self):
         """Test tracking variables across complex nested scopes."""
         code = """
