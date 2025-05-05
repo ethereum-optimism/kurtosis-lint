@@ -86,9 +86,12 @@ File with comprehensions.
 
 # Valid list comprehension                   
 [s.replace('a', 'b') for s in ['a', 'b']]
+[k for k, v in enumerate({})]
                     
 # Invalid list comprehension                   
 [x.replace('a', 'b') for s in ['a', 'b']]
+[y.replace('a', 'b') for k, v in enumerate({})]
+[z.replace('a', 'b') for k, v in enumerate({})]
 ''')
         
         # Create a file with function calls
@@ -336,6 +339,7 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
         
         # Check that violations were found
         self.assertTrue(violations)
+        self.assertEqual(len(violations), 3)
         
         # Check that the correct violations were reported
         messages = self._extract_violation_messages(violations)
@@ -345,6 +349,18 @@ optimism_args = input_parser.documented_function(get_args().get("optimism_packag
             messages, 
             "'x'", 
             "Invalid object 'x' in call to 'x.replace': object is not defined"
+        )
+
+        self._assert_contains_message(
+            messages, 
+            "'y'", 
+            "Invalid object 'y' in call to 'y.replace': object is not defined"
+        )
+
+        self._assert_contains_message(
+            messages, 
+            "'z'", 
+            "Invalid object 'z' in call to 'z.replace': object is not defined"
         )
 
     def test_plop_scenario(self):

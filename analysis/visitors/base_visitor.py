@@ -170,7 +170,11 @@ class BaseVisitor(ast.NodeVisitor):
 
         # Add generators to the scope
         for generator in node.generators:
-            self._add_to_current_scope(generator.target.id)
+            if isinstance(generator.target, ast.Tuple):
+                for elt in generator.target.elts:
+                    self._add_to_current_scope(elt.id)
+            else:
+                self._add_to_current_scope(generator.target.id)
         
         # Visit the list comprehension expression
         self.visit(node.elt)
