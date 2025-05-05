@@ -1,0 +1,13 @@
+[env]
+# Automatic virtualenv activation
+_.python.venv = { path = ".venv", create = true }
+
+[tools]
+python = "{{ get_env(name='PYTHON_VERSION', default='3.11') }}"
+pytest = "8.3.5"
+
+[alias]
+pytest = "pipx:pytest"
+
+[hooks]
+postinstall = "uv pip install -r requirements.txt"
